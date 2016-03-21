@@ -1,7 +1,9 @@
 package flagtypes
 
 import (
+	"io/ioutil"
 	"os"
+	"strings"
 )
 
 // FileOrStdin is a go-flags option type that, after argument parsing, should
@@ -27,7 +29,7 @@ func (f *FileOrStdin) UnmarshalFlag(value string) error {
 		f.File = os.Stdin
 		return nil
 	default:
-		f.File, err = os.Open(value)
+		f.File, err = os.Open(expandUser(value))
 		return err
 	}
 }
@@ -47,7 +49,7 @@ type FileOrStdout struct {
 	*os.File
 }
 
-func (f FileOrStdout) MarshalFlag() (string, error) {
+func (f *FileOrStdout) MarshalFlag() (string, error) {
 	if _, err := f.Stat(); err != nil {
 		return "", err
 	}
@@ -63,7 +65,7 @@ func (f *FileOrStdout) UnmarshalFlag(value string) error {
 		f.File = os.Stdout
 		return nil
 	default:
-		f.File, err = os.OpenFile(value, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+		f.File, err = os.OpenFile(expandUser(value), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 		return err
 	}
 }
@@ -73,4 +75,37 @@ func (f *FileOrStdout) Close() error {
 		return nil
 	}
 	return f.File.Close()
+}
+
+// StringOrFile is a go-flags option type that can be used for some flags whose values
+// may be better kept in a file or file-like object. If the string begins with "file://"
+// read the contents of the specified file, otherwise use the provided value as-is.
+type StringOrFile struct {
+	val string
+}
+
+func (s *StringOrFile) String() string {
+	return s.val
+}
+
+func (s StringOrFile) MarshalFlag() (string, error) {
+	return s.val, nil
+}
+
+func (s *StringOrFile) UnmarshalFlag(value string) error {
+	switch {
+	case value == "":
+		return os.ErrInvalid
+	case strings.HasPrefix(value, "file://"):
+		fileName := expandUser(strings.TrimPrefix(value, "file://"))
+		val, err := ioutil.ReadFile(fileName)
+		if err != nil {
+			return err
+		}
+		s.val = string(val)
+		return nil
+	default:
+		s.val = value
+		return nil
+	}
 }

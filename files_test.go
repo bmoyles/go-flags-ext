@@ -2,10 +2,11 @@ package flagtypes_test
 
 import (
 	"fmt"
-	"github.com/bmoyles/go-flags-types"
-	"github.com/jessevdk/go-flags"
 	"io/ioutil"
 	"os"
+
+	"github.com/bmoyles/go-flags-types"
+	"github.com/jessevdk/go-flags"
 )
 
 func ExampleFileOrStdin_stdin() {
