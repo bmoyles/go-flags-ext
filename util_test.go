@@ -1,4 +1,4 @@
-package flagtypes
+package flagext
 
 import (
 	"os/user"
@@ -17,7 +17,7 @@ func TestExpandUser(t *testing.T) {
 		{provided: "~somefakeuser/foo/bar", expected: "~somefakeuser/foo/bar"},
 	}
 	for _, item := range testData {
-		if expandUser(item.provided) != item.expected {
+		if ExpandUser(item.provided) != item.expected {
 			t.Errorf("Provided string (%s) does not match expected string (%s)", item.provided, item.expected)
 		}
 	}

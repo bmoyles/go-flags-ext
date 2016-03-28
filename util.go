@@ -1,4 +1,4 @@
-package flagtypes
+package flagext
 
 import (
 	"os"
@@ -7,8 +7,16 @@ import (
 	"strings"
 )
 
-// tilde expansion in path names
-func expandUser(path string) string {
+// ExpandUser receives a path as a string and attempts to expand a leading tilde
+// or leading tilde + username to the actual user home directory in case it is not
+// expanded by the shell first. If the home directory cannot be expanded, the path
+// is returned as-is.
+//
+// Example
+//
+// If user foo does exist, ExpandUser("~foo/bar") should return "<path to foo home directory>/bar"
+// If user foo does NOT exist, ExpandUser("~foo/bar") will return "~foo/bar" as-is
+func ExpandUser(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}

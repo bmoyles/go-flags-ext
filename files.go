@@ -1,111 +1,106 @@
-package flagtypes
+package flagext
 
 import (
+	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"strings"
 )
 
-// FileOrStdin is a go-flags option type that, after argument parsing, should
-// contain the requested filename opened for reading, or, os.Stdin if the
-// requested filename is "-"
-type FileOrStdin struct {
+// equivalent of ioutil.NopCloser() for writers so we can avoid closing os.Stdout
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (nopWriteCloser) Close() error { return nil }
+
+// NopWriteCloser wraps an io.Writer in a struct that exposes a no-op Close() method and returns it as an io.WriteCloser
+func NopWriteCloser(w io.Writer) io.WriteCloser {
+	return nopWriteCloser{w}
+}
+
+// InputFile, after argument parsing, should contain the requested filename opened for reading
+type InputFile struct {
 	*os.File
 }
 
-func (f FileOrStdin) MarshalFlag() (string, error) {
+// MasrshalFlag returns the string representation of the InputFile (the file name) or an error if there was
+// a problem calling Stat() on the file
+func (f *InputFile) MarshalFlag() (string, error) {
 	if _, err := f.Stat(); err != nil {
 		return "", err
 	}
 	return f.Name(), nil
 }
 
-func (f *FileOrStdin) UnmarshalFlag(value string) error {
-	var err error
-	switch value {
-	case "":
-		return os.ErrInvalid
-	case "-":
-		f.File = os.Stdin
-		return nil
-	default:
-		f.File, err = os.Open(expandUser(value))
-		return err
-	}
+// UnmarshalFlag attempts to return a file opened for reading with the input string value used as the filename
+func (f *InputFile) UnmarshalFlag(value string) error {
+	f.File, err = os.Open(ExpandUser(value))
+	return err
 }
 
-func (f *FileOrStdin) Close() error {
-	if f.File == os.Stdin {
-		return nil
-	}
-	return f.File.Close()
-}
-
-// FileOrStdout is a go-flags option type that, after argument parsing, should
-// contain the requested filename opened for writing, or, os.Stdout if the
-// requested filename is "-". The file, when not os.Stdout, is opened with
+// OutputFile is a go-flags option type that, after argument parsing, should
+// contain the requested filename opened for writing. The file is opened with
 // os.O_WRONLY|os.O_CREATE|os.O_TRUNC and FileMode 0600.
-type FileOrStdout struct {
+type OutputFile struct {
 	*os.File
 }
 
-func (f *FileOrStdout) MarshalFlag() (string, error) {
+// UnmasrshalFlag returns the string representation of the OutputFile (the file name) or an error if there was
+// a problem calling Stat() on the file
+func (f *OutputFile) MarshalFlag() (string, error) {
 	if _, err := f.Stat(); err != nil {
 		return "", err
 	}
 	return f.Name(), nil
 }
 
-func (f *FileOrStdout) UnmarshalFlag(value string) error {
-	var err error
-	switch value {
-	case "":
-		return os.ErrInvalid
-	case "-":
-		f.File = os.Stdout
-		return nil
-	default:
-		f.File, err = os.OpenFile(expandUser(value), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		return err
-	}
+// UnmarshalFlag attempts to return a file opened for writing with the input string value used as the filename
+func (f *OutputFile) UnmarshalFlag(value string) error {
+	f.File, err = os.OpenFile(ExpandUser(value), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	return err
 }
 
-func (f *FileOrStdout) Close() error {
-	if f.File == os.Stdout {
-		return nil
-	}
-	return f.File.Close()
+// MultiSourceString is a go-flags option type that, depending on the presence of a
+// prefix in the value, may read the actual value from another location.
+// Value file:<filename> returns the contents of the file specified by <filename> as a string
+// Value env:<environment_variable> returns the contents of the environment variable specified by <environment_variable> as a string
+// Values with no prefix are returned as strings, unmanipulated
+type MultiSourceString struct {
+	s string
 }
 
-// StringOrFile is a go-flags option type that can be used for some flags whose values
-// may be better kept in a file or file-like object. If the string begins with "file://"
-// read the contents of the specified file, otherwise use the provided value as-is.
-type StringOrFile struct {
-	val string
+func (s *MultiSourceString) String() string {
+	return s.s
 }
 
-func (s *StringOrFile) String() string {
-	return s.val
+func (s *MultiSourceString) MarshalFlag() (string, error) {
+	return s.s, nil
 }
 
-func (s StringOrFile) MarshalFlag() (string, error) {
-	return s.val, nil
-}
-
-func (s *StringOrFile) UnmarshalFlag(value string) error {
+func (s *MultiSourceString) UnmarshalFlag(value string) error {
 	switch {
 	case value == "":
-		return os.ErrInvalid
-	case strings.HasPrefix(value, "file://"):
-		fileName := expandUser(strings.TrimPrefix(value, "file://"))
-		val, err := ioutil.ReadFile(fileName)
+		return "", fmt.Errorf("Received empty string, value must be provided")
+	case strings.HasPrefix(value, "file:"):
+		filename := ExpandUser(strings.TrimPrefix(value, "file:"))
+		val, err := ioutil.ReadFile(filename)
 		if err != nil {
 			return err
 		}
-		s.val = string(val)
+		s.s = string(val)
 		return nil
+	case strings.HasPrefix(value, "env:"):
+		envVar := strings.TrimPrefix(value, "env:")
+		envVal, ok := os.LookupEnv(envVar)
+		if (!ok) || (envVal == "") {
+			return "", fmt.Errorf("Environment variable %s empty or non-existent", envVar)
+		}
+		s.s = envVal
+		nil
 	default:
-		s.val = value
+		s.s = value
 		return nil
 	}
 }
