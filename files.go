@@ -1,123 +1,138 @@
 package flagext
 
 import (
+	//"log"
 	"os"
-	"path/filepath"
-
-	"github.com/jessevdk/go-flags"
+	//"path/filepath"
+	//"github.com/jessevdk/go-flags"
 )
 
-// InputFile, when unmarshaled, embeds an os.File opened for reading.
+const DefaultRWFileFlag int = os.O_CREATE | os.O_RDWR
+const DefaultRWFilePerm os.FileMode = 0600
+
+type file struct {
+	*os.File
+	nopClose bool
+}
+
+func (f *file) Close() error {
+	if f.nopClose {
+		return nil
+	}
+	return f.File.Close()
+}
+
+func (f *file) MarshalFlag() (string, error) {
+	return f.Name(), nil
+}
+
 type InputFile struct {
-	*os.File
-	// NopClose, if true, overrides the file's Close() method to do nothing
-	// similar to ioutil.NopCloser.
-	NopClose bool
+	file
+	nopClose bool
 }
 
-// NewInputFile creates an InputFile from an existing opened os.File.
-// Useful for setting defaults via struct initialization rather than struct tags.
-func NewInputFile(f *os.File) InputFile {
-	return InputFile{File: f}
-}
-
-// MasrshalFlag returns the input file name
-func (f *InputFile) MarshalFlag() (string, error) {
-	return f.Name(), nil
-}
-
-// UnmarshalFlag attempts to return a file opened for reading with the input
-// string value used as the filename
-func (f *InputFile) UnmarshalFlag(value string) error {
-	file, err := os.Open(ExpandUser(value))
+func (i *InputFile) UnmarshalFlag(value string) error {
+	inFile, err := os.Open(ExpandUser(value))
 	if err != nil {
 		return err
 	}
-	*f = InputFile{File: file}
+	i.file = file{File: inFile, nopClose: i.NopClose()}
 	return nil
 }
 
-// Close, if InputFile.NopClose is true, simply returns nil, otherwise the embedded os.File's
-// Close is called.
-func (f *InputFile) Close() error {
-	if f.NopClose {
-		return nil
-	}
-	return f.File.Close()
+func (i *InputFile) SetDefaultFile(defaultFile *os.File, nopClose bool) {
+	i.file = file{File: defaultFile, nopClose: nopClose}
 }
 
-// DefaultToStdin is a convenience method that should be used when setting defaults via
-// struct initialization rather than tags so the default file is os.Stdin
-func (f *InputFile) DefaultToStdin() {
-	*f = InputFile{File: os.Stdin}
-	f.NopClose = true
+func (i *InputFile) SetNopClose(value bool) {
+	i.nopClose = value
 }
 
-// Complete satisfies flags.Completer and returns potential file matches based on current input.
-func (f *InputFile) Complete(match string) []flags.Completion {
-	items, _ := filepath.Glob(ExpandUser(match) + "*")
-	completions := make([]flags.Completion, len(items))
-
-	for i, v := range items {
-		completions[i].Item = v
-	}
-	return completions
+func (i *InputFile) NopClose() bool {
+	return i.nopClose
 }
 
-// OutputFile, when unmarshaled, embeds an os.File opened for writing.
-// The file is opened with os.O_WRONLY|os.O_CREATE|os.O_TRUNC and FileMode 0600.
 type OutputFile struct {
-	*os.File
-	// NopClose, if true, overrides the file's Close() method to do nothing
-	// similar to ioutil.NopCloser.
-	NopClose bool
+	file
+	nopClose bool
 }
 
-// NewOutputFile creates an OutputFile from an existing opened os.File.
-// Useful for setting defaults via struct initialization rather than struct tags.
-func NewOutputFile(f *os.File) OutputFile {
-	return OutputFile{File: f}
-}
-
-// UnmasrshalFlag returns the output file name
-func (f *OutputFile) MarshalFlag() (string, error) {
-	return f.Name(), nil
-}
-
-// UnmarshalFlag attempts to return a file opened for writing with the input
-// string value used as the filename
-func (f *OutputFile) UnmarshalFlag(value string) error {
-	file, err := os.OpenFile(ExpandUser(value), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+func (o *OutputFile) UnmarshalFlag(value string) error {
+	outFile, err := os.OpenFile(ExpandUser(value), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	*f = OutputFile{File: file}
+	o.file = file{File: outFile, nopClose: o.NopClose()}
 	return nil
 }
 
-// Close, if OutputFile.NopClose is true, simply returns nil, otherwise the
-// embedded os.File's Close is called.
-func (f *OutputFile) Close() error {
-	if f.NopClose {
-		return nil
-	}
-	return f.File.Close()
+func (o *OutputFile) SetDefaultFile(defaultFile *os.File, nopClose bool) {
+	o.file = file{File: defaultFile, nopClose: nopClose}
 }
 
-// DefaultToStdout is a convenience method that should be used when setting defaults via
-// struct initialization rather than tags so the default file is os.Stdout
-func (f *OutputFile) DefaultToStdout() {
-	*f = OutputFile{File: os.Stdout}
-	f.NopClose = true
+func (o *OutputFile) SetNopClose(value bool) {
+	o.nopClose = value
 }
 
-// Complete satisfies flags.Completer and returns potential file matches based on current input.
-func (f *OutputFile) Complete(match string) []flags.Completion {
-	items, _ := filepath.Glob(ExpandUser(match) + "*")
-	completions := make([]flags.Completion, len(items))
+func (o *OutputFile) NopClose() bool {
+	return o.nopClose
+}
 
-	for i, v := range items {
-		completions[i].Item = v
+type ReadWriteFile struct {
+	file
+	flag struct {
+		flag       int
+		overridden bool
 	}
-	return completions
+	perm struct {
+		perm       os.FileMode
+		overridden bool
+	}
+	parsed bool
+}
+
+func (rw *ReadWriteFile) UnmarshalFlag(value string) error {
+	rwFile, err := os.OpenFile(value, rw.Flag(), rw.Perm())
+	if err != nil {
+		return err
+	}
+	rw.file = file{File: rwFile, nopClose: rw.NopClose()}
+	rw.parsed = true
+	return nil
+}
+
+func (rw *ReadWriteFile) SetDefaultFile(defaultFile *os.File, nopClose bool) {
+	rw.file = file{File: defaultFile, nopClose: nopClose}
+}
+
+func (rw *ReadWriteFile) SetNopClose(value bool) {
+	rw.nopClose = value
+}
+
+func (rw *ReadWriteFile) NopClose() bool {
+	return rw.nopClose
+}
+
+func (rw *ReadWriteFile) SetFlag(value int) {
+	rw.flag.flag = value
+	rw.flag.overridden = true
+}
+
+func (rw *ReadWriteFile) Flag() int {
+	if (!rw.flag.overridden) && rw.flag.flag == 0 {
+		rw.flag.flag = DefaultRWFileFlag
+	}
+	return rw.flag.flag
+}
+
+func (rw *ReadWriteFile) SetPerm(value os.FileMode) {
+	rw.perm.perm = value
+	rw.perm.overridden = true
+}
+
+func (rw *ReadWriteFile) Perm() os.FileMode {
+	if (!rw.perm.overridden) && rw.perm.perm == 0 {
+		rw.perm.perm = DefaultRWFilePerm
+	}
+	return rw.perm.perm
 }
